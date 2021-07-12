@@ -10,7 +10,6 @@ import torch.optim.lr_scheduler as lr_scheduler
 from torch.nn.parameter import Parameter
 
 from dataset import GraphData
-from uni_dataset import UniGraphData
 from generate_mdps import find_policy
 
 
@@ -96,49 +95,6 @@ def evaluate(data, gnn_steps):
                                                     np.mean(np.array(losses[i]))))
 
     return [l[-1] for l in losses], [a[-1] for a in accs], losses, accs, gt_losses, gt_accs
-
-
-def uni_evaluate(data):
-    model.eval()
-    node_feat, adj_mat, adj_mask, vs, policy_dict = data
-
-    policy_dict['p'] = policy_dict['p'].to(args.device)
-    policy_dict['r'] = policy_dict['r'].to(args.device)
-    policy_dict['policy'] = policy_dict['policy'].to(args.device)
-
-    # node_feat.shape: value_iter_steps, s, 1+a  (v, r_1...a)
-    # node_feat.shape: value_iter_steps, a, s, 1+a  (v, r_1...a)
-    # adj_mat.shape: a, s, s, 2 (p, gamma)
-    iteration_steps = node_feat.shape[0]
-    input_node_feat = node_feat[0]  # s, 1+a
-
-    values = torch.zeros(node_feat.shape[1], 1, device=args.device)
-    accs = []
-    gt_accs = []
-    losses = []
-    gt_losses = []
-    for step in range(iteration_steps - 1):
-        output = model((input_node_feat, adj_mat, adj_mask))
-        values += output
-
-        # output: s, 1 -> a,s,1
-        # print("vs delta, Loss ", vs[step+1]-vs[step], loss.item())
-        input_node_feat = torch.cat((output +  # s, 1
-                                     input_node_feat[:, 0:1],
-                                     node_feat[step + 1, :, 1:]), dim=-1)
-
-        losses += [loss_fn(values, vs[-1]).detach().cpu().item()]
-        gt_losses += [loss_fn(vs[step], vs[-1]).detach().cpu().item()]
-
-        gt_policy = find_policy(policy_dict['p'], policy_dict['r'], policy_dict['discount'], vs[step])
-        gt_accs += [100. * torch.eq(gt_policy, policy_dict['policy']).detach().cpu().sum() / len(output)]
-        predicted_policy = find_policy(policy_dict['p'], policy_dict['r'], policy_dict['discount'], values.squeeze())
-        accs += [100. * torch.eq(predicted_policy, policy_dict['policy']).detach().cpu().sum() / len(output)]
-
-    if epoch % 10 == 0:
-        print('Test set (epoch {}): \t Last step accuracy {} \t Last step loss {:.6f} , Average loss: {:.6f} \n'.format(
-            epoch + 1, accs[-1], losses[-1], np.mean(np.array(losses))))
-    return losses[-1], accs[-1], losses, accs, gt_losses, gt_accs
 
 
 parser = argparse.ArgumentParser(description='Graph Convolutional Networks')
@@ -240,24 +196,8 @@ for key in sorted(argsdict):
 edge_features = 2
 node_features = 2
 
-if args.sparse_gnn:
-    if args.graph_data_format == 'separate':
-        from sparse_models import SparseMPNN
-
-        MPNN = SparseMPNN
-    elif args.graph_data_format == 'uni':
-        from uni_sparse_models import UniSparseMPNN
-
-        MPNN = UniSparseMPNN
-        edge_features = 2 + args.train_num_actions
-        node_features = 1 + args.train_num_actions
-        evaluate = uni_evaluate
-    else:
-        raise NotImplementedError
-else:
-    from dense_models import DenseMPNN
-
-    MPNN = DenseMPNN
+from sparse_models import SparseMPNN
+MPNN = SparseMPNN
 
 model = MPNN(node_features=2,
              edge_features=2,
@@ -293,10 +233,6 @@ else:
                                            max_jumpback=args.freeway_max_jumpback,
                                            p_jumpback_if_hit=args.freeway_p_jumpback_if_hit,
                                            p_jumpback=args.freeway_p_jumpback)
-    elif args.graph_data_format == 'uni':
-        iterable_train_dataset = UniGraphData(num_states=args.train_num_states, num_actions=args.train_num_actions,
-                                              epsilon=args.epsilon, graph_type=args.train_graph_type, seed=args.seed,
-                                              device=args.device, sparse=args.sparse_gnn)
     else:
         raise NotImplementedError
 
@@ -346,9 +282,6 @@ while test_loop:
                                           max_jumpback=args.freeway_max_jumpback,
                                           p_jumpback_if_hit=args.freeway_p_jumpback_if_hit,
                                           p_jumpback=args.freeway_p_jumpback)
-    elif args.graph_data_format == 'uni':
-        iterable_test_dataset = UniGraphData(num_states=states, num_actions=actions, epsilon=args.epsilon,
-                                             graph_type=args.test_graph_type, seed=args.seed, sparse=args.sparse_gnn)
     else:
         raise NotImplementedError
 
