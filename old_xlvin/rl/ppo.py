@@ -54,7 +54,6 @@ class RolloutStorage(object):
 
         self.step = (self.step + 1) % self.num_steps
 
-    # TODO use_proper_time_limits (bad-masks for timeout)
     def compute_returns(self,
                         next_value,
                         use_gae,
@@ -139,194 +138,6 @@ class FixedCategorical(torch.distributions.Categorical):
 
     def mode(self):
         return self.probs.argmax(dim=-1, keepdim=True)
-
-
-class VINPolicy(nn.Module):
-    def __init__(self, network, hidden_size, action_space, img_size, num_processes, env_type=None):
-        super().__init__()
-        print('hidden size', hidden_size)
-        # TODO support non-discrete action worlds
-        self.network = network
-        self.img_size = img_size
-        self.num_processes = num_processes
-        self.env_type = env_type
-
-        if action_space.__class__.__name__ == 'Discrete':
-            num_outputs = action_space.n
-            self.actor_linear = nn.Linear(hidden_size, num_outputs)
-        else:
-            raise NotImplementedError
-        self.critic_linear = nn.Linear(hidden_size, 1)
-
-    # TODO support recurrent updates (with GRU hidden state)
-    def act(self, observations, deterministic=False):
-        # observations shape: (num_processes, 3, 8, 8)
-        if self.env_type == "maze":
-            obs = observations[:, 0]
-            position = observations[:, 1]
-            goals = observations[:, 2]
-            x, y = self._coordinates(position)
-            enc_obs = torch.cat([obs.unsqueeze(1), goals.unsqueeze(1)], dim=1)
-        elif self.env_type in ["mini", 'mini-avoid', 'mini-hunt', 'mini-ambush', 'mini-rush']:
-            enc_obs = observations[:, :-1]
-            position_channel = observations[:, -1]
-            x, y = self._coordinates(position_channel)
-        latents = self.network(enc_obs, x, y)
-        policy = self.actor_linear(latents)
-        value = self.critic_linear(latents)
-        actor = FixedCategorical(logits=policy)
-
-        if deterministic:
-            action = actor.mode()
-        else:
-            action = actor.sample()
-
-        log_probs = actor.log_probs(action)
-        entropy = actor.entropy().mean()
-
-        return value, action, log_probs
-
-    def get_value(self, observations):
-        # observations shape: (num_processes, 3, 8, 8)
-        if self.env_type == "maze":
-            obs = observations[:, 0]
-            position = observations[:, 1]
-            goals = observations[:, 2]
-            x, y = self._coordinates(position)
-            enc_obs = torch.cat([obs.unsqueeze(1), goals.unsqueeze(1)], dim=1)
-        elif self.env_type in ["mini", 'mini-avoid', 'mini-hunt', 'mini-ambush', 'mini-rush']:
-            enc_obs = observations[:, :-1]
-            position_channel = observations[:, -1]
-            x, y = self._coordinates((position_channel))
-        latents = self.network(enc_obs, x, y)
-        return self.critic_linear(latents)
-
-    def evaluate_actions(self, observations, actions):
-        # observations shape: (num_processes, 3, 8, 8)
-        if self.env_type == "maze":
-            obs = observations[:, 0]
-            position = observations[:, 1]
-            goals = observations[:, 2]
-            x, y = self._coordinates(position)
-            enc_obs = torch.cat([obs.unsqueeze(1), goals.unsqueeze(1)], dim=1)
-        elif self.env_type in ["mini", 'mini-avoid', 'mini-hunt', 'mini-ambush', 'mini-rush']:
-            enc_obs = observations[:, :-1]
-            position_channel = observations[:, -1]
-            x, y = self._coordinates((position_channel))
-        latents = self.network(enc_obs, x, y)
-
-        policy = self.actor_linear(latents)
-        value = self.critic_linear(latents)
-        actor = FixedCategorical(logits=policy)
-
-        log_probs = actor.log_probs(actions)
-        entropy = actor.entropy().mean()
-
-        return value, log_probs, entropy
-
-    def _coordinates(self, position):
-        if self.img_size == 20:
-            # exploded maze
-            flattened_pos = (position.flatten(start_dim=1) + 0.001 * torch.range(0, 20 * 20-1)).argmax(dim=1)
-            return flattened_pos // self.img_size[1] - 1, flattened_pos % self.img_size[1] - 1
-        else:
-            flattened_pos = position.flatten(start_dim=1).argmax(dim=1)
-            return flattened_pos // self.img_size[1], flattened_pos % self.img_size[1]
-
-
-
-class GVINPolicy(nn.Module):
-    def __init__(self, network, hidden_size, action_space, img_size, num_processes, env_type=None):
-        super().__init__()
-        print('hidden size', hidden_size)
-        # TODO support non-discrete action worlds
-        self.network = network
-        self.img_size = img_size
-        self.num_processes = num_processes
-        self.env_type = env_type
-
-        if action_space.__class__.__name__ == 'Discrete':
-            num_outputs = action_space.n
-            self.actor_linear = nn.Linear(hidden_size, num_outputs)
-        else:
-            raise NotImplementedError
-        self.critic_linear = nn.Linear(hidden_size, 1)
-
-    # TODO support recurrent updates (with GRU hidden state)
-    def act(self, observations, deterministic=False):
-        # observations shape: (num_processes, 3, 8, 8)
-        if self.env_type == "maze":
-            obs = observations[:, 0]
-            position = observations[:, 1]
-            goals = observations[:, 2]
-            x, y = self._coordinates(position)
-            enc_obs = torch.cat([obs.unsqueeze(1), goals.unsqueeze(1)], dim=1)
-        elif self.env_type in ["mini", 'mini-avoid', 'mini-hunt', 'mini-ambush', 'mini-rush']:
-            enc_obs = observations[:, :-1]
-            position_channel = observations[:, -1]
-            x,y = self._coordinates(position_channel)
-
-        latents = self.network(enc_obs, x, y)
-        policy = self.actor_linear(latents)
-        value = self.critic_linear(latents)
-        actor = FixedCategorical(logits=policy)
-
-        if deterministic:
-            action = actor.mode()
-        else:
-            action = actor.sample()
-
-        log_probs = actor.log_probs(action)
-        entropy = actor.entropy().mean()
-
-        return value, action, log_probs
-
-    def get_value(self, observations):
-        # observations shape: (num_processes, 3, 8, 8)
-        if self.env_type == "maze":
-            obs = observations[:, 0]
-            position = observations[:, 1]
-            goals = observations[:, 2]
-            x, y = self._coordinates(position)
-            enc_obs = torch.cat([obs.unsqueeze(1), goals.unsqueeze(1)], dim=1)
-        elif self.env_type in ["mini", 'mini-avoid', 'mini-hunt', 'mini-ambush', 'mini-rush']:
-            enc_obs = observations[:, :-1]
-            position_channel = observations[:, -1]
-            x, y = self._coordinates((position_channel))
-        latents = self.network(enc_obs, x, y)
-        return self.critic_linear(latents)
-
-    def evaluate_actions(self, observations, actions):
-        # observations shape: (num_processes, 3, 8, 8)
-        if self.env_type == "maze":
-            obs = observations[:, 0]
-            position = observations[:, 1]
-            goals = observations[:, 2]
-            x, y = self._coordinates(position)
-            enc_obs = torch.cat([obs.unsqueeze(1), goals.unsqueeze(1)], dim=1)
-        elif self.env_type in ["mini", 'mini-avoid', 'mini-hunt', 'mini-ambush', 'mini-rush']:
-            enc_obs = observations[:, :-1]
-            position_channel = observations[:, -1]
-            x, y = self._coordinates((position_channel))
-        latents = self.network(enc_obs, x, y)
-
-        policy = self.actor_linear(latents)
-        value = self.critic_linear(latents)
-        actor = FixedCategorical(logits=policy)
-
-        log_probs = actor.log_probs(actions)
-        entropy = actor.entropy().mean()
-
-        return value, log_probs, entropy
-
-    def _coordinates(self, position):
-        if self.img_size == 20:
-            # exploded maze
-            flattened_pos = (position.flatten(start_dim=1) + 0.001 * torch.range(0, 20 * 20 - 1)).argmax(dim=1)
-            return flattened_pos // self.img_size[1] - 1, flattened_pos % self.img_size[1] - 1
-        else:
-            flattened_pos = position.flatten(start_dim=1).argmax(dim=1)
-            return flattened_pos // self.img_size[1], flattened_pos % self.img_size[1]
 
 
 class XLVINPolicy(nn.Module):
@@ -554,39 +365,6 @@ class XLVINPolicy(nn.Module):
         entropy = actor.entropy().mean()
         return value, log_probs, entropy
 
-class ATreeCPolicy(nn.Module):
-    def __init__(self, network):
-        super().__init__()
-        self.network = network
-
-    # TODO support recurrent updates (with GRU hidden state)
-    def act(self, observations, deterministic=False):
-        policy, values, _ = self.network(observations) 
-
-        actor = FixedCategorical(logits=policy)
-
-        if deterministic:
-            action = actor.mode()
-        else:
-            action = actor.sample()
-
-        log_probs = actor.log_probs(action)
-        return values, action, log_probs
-
-    def get_value(self, observations):
-        # observations shape: (num_processes, 3, 8, 8)
-        _, values, _ = self.network(observations) 
-        return values
-
-    def evaluate_actions(self, observations, actions):
-        # observations shape: (num_processes, 3, 8, 8)
-        policy, values, _ = self.network(observations)
-        actor = FixedCategorical(logits=policy)
-
-        log_probs = actor.log_probs(actions)
-        entropy = actor.entropy().mean()
-
-        return values, log_probs, entropy
 
 class PPO():
     def __init__(self,
@@ -702,7 +480,6 @@ class PPO():
 
 
 def gather_rollout(env, policy, num_steps, gamma, num_processes, device, deterministic=False, have_solved_state=True):
-    #TODO: inefficient, should move outside?
     rollouts = RolloutStorage(num_steps, env.observation_space.shape, env.action_space, device, num_processes,
                               have_solved_state)
     num_passed = 0
@@ -759,7 +536,6 @@ def gather_fixed_ep_rollout(env, policy, num_episodes, gamma, num_processes, dev
 
         reward = torch.tensor(reward)
         mask = ~ torch.tensor(done).unsqueeze_(-1)
-        #TODO: this is sometimes pairing (end_ep, beg_ep')
         next_obs = obs
 
         all_obs += [obs]
@@ -793,71 +569,3 @@ def gather_fixed_ep_rollout(env, policy, num_episodes, gamma, num_processes, dev
     gae_lambda = 0.01
     rollouts.compute_returns(next_value, use_gae, gamma, gae_lambda)
     return rollouts
-
-
-def gather_fixed_step_rollout(env, policy, num_steps, gamma, num_processes, device, deterministic=False,
-                              have_solved_state=False):
-    all_obs = []
-    all_actions = []
-    all_log_probs = []
-    all_values = []
-    all_rewards = []
-    all_masks =[]
-    all_next_obs = []
-
-    obs = env.reset()
-    all_obs += [obs]
-    done_ep = 0
-    step = 0
-    while step < num_steps:
-
-        with torch.no_grad():
-            value, action, log_probs = policy.act(all_obs[-1].to(device), deterministic=deterministic)
-        # env.render()
-        obs, reward, done, _ = env.step(action)
-        done_ep += torch.sum(torch.tensor(done))
-
-        reward = torch.tensor(reward)
-        mask = ~ torch.tensor(done).unsqueeze_(-1)
-        #TODO: this is sometimes pairing (end_ep, beg_ep')
-        next_obs = obs
-
-        all_obs += [obs]
-        all_actions += [action.to('cpu')]
-        all_log_probs += [log_probs.to('cpu')]
-        all_values += [value.to('cpu')]
-        all_rewards += [reward]
-        all_masks += [mask]
-
-        all_next_obs += [next_obs]
-
-        step +=1
-
-    print("Number of steps ", step)
-    print('Number of episodes ', done_ep)
-
-    rollouts = RolloutStorage(step, env.observation_space.shape, env.action_space, device, num_processes,
-                              have_solved_state=True)
-
-    rollouts.obs = torch.stack(all_obs, dim=0)
-    rollouts.actions = torch.stack(all_actions, dim=0)
-    rollouts.action_log_probs = torch.stack(all_log_probs, dim=0)
-    rollouts.value_preds = torch.cat((torch.zeros_like(all_values[0]).unsqueeze(0), torch.stack(all_values, dim=0)), dim=0)
-    rollouts.rewards = torch.stack(all_rewards, dim=0)
-    rollouts.masks = torch.cat((torch.zeros_like(all_masks[0]).unsqueeze(0), torch.stack(all_masks, dim=0)), dim=0)
-
-    rollouts.solved_obs = torch.stack(all_next_obs, dim=0)
-
-    with torch.no_grad():
-        next_value = policy.get_value(rollouts.obs[-1].to(rollouts.device)).detach()
-    use_gae = False
-    gae_lambda = 0.01
-    rollouts.compute_returns(next_value, use_gae, gamma, gae_lambda)
-    return rollouts
-
-
-
-# TODO now we can call
-# value_loss, action_loss, dist_entropy = ppo.update(rollouts)
-# Also, we might want to have another routine to set last state in rollouts back to pos-zero
-# (so we don't need to re-initialise the environment)
