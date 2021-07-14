@@ -6,6 +6,7 @@ from logml_xlvin.src.create_graph import create_graph_v2
 from logml_xlvin.src.executor import SparseMPNN
 from old_xlvin.rl.ppo import FixedCategorical
 
+# TODO: rewrite! It's an old one (refactored a little bit)
 
 class XLVINModel(nn.Module):
 
