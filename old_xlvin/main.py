@@ -16,22 +16,9 @@ from TransE.cartpole_main import train_transe
 from TransE.mountaincar_main import train_transe
 
 def evaluate_step_batch(env_type, reward, done):
-    if env_type == 'maze':
-        passed = torch.sum(torch.eq(reward, torch.ones_like(reward, device=args.device)))
-        failed = torch.sum(torch.eq(reward, torch.ones_like(reward, device=args.device) * -1))
-        done_ep = passed + failed
-    elif env_type in ['cartpole', 'mountaincar', 'acrobot']:
+    if env_type in ['cartpole', 'mountaincar', 'acrobot']:
         passed = torch.sum(reward)
         done_ep = torch.sum(torch.tensor(done, device=args.device))
-    elif env_type == 'sokoban':
-        passed = torch.sum(torch.eq(reward, torch.ones_like(reward, device=args.device) * 10.9))
-        done_ep = torch.sum(torch.tensor(done, device=args.device))
-    elif env_type in ['freeway', 'enduro', 'krull', 'alien', 'mspacman', 'crazyclimber', 'pong',
-            'mini', 'mini-avoid', 'mini-hunt', 'mini-ambush', 'mini-rush']:
-        passed = torch.sum(reward)
-        done_ep = torch.sum(torch.tensor(done, device=args.device))
-    else:
-        raise NotImplementedError
     return done_ep, passed
 
 
@@ -42,10 +29,7 @@ def run_fixed_nb_episodes(env, policy, level, rollout, exp_config_file, nb_episo
     all_passed = 0
     while ep < nb_episodes:
         with torch.no_grad():
-            if env_type in ['maze', 'sokoban', 'freeway', 'enduro', 'krull',
-                            'alien', 'mspacman', 'crazyclimber', 'pong']:
-                deterministic = False
-            elif env_type in ['cartpole', 'mountaincar', 'acrobot',
+            if env_type in ['cartpole', 'mountaincar', 'acrobot',
                     'mini', 'mini-avoid', 'mini-hunt', 'mini-ambush', 'mini-rush']:
                 deterministic = True
             else:
@@ -58,68 +42,12 @@ def run_fixed_nb_episodes(env, policy, level, rollout, exp_config_file, nb_episo
         ep += done_ep
         all_passed += passed_metric
 
-    if env_type == 'maze':
-        perc_passed = all_passed * 100. / ep
-        print("Rollout {} : percentage passed {:.3f} from total episodes {}".format(
-            rollout, perc_passed, ep))
-
-        if perc_passed > lvl_threshold:
-            print("Level {}, rollout {} : percentage passed {:.3f} from total episodes {}".format(
-                level, rollout, perc_passed, ep))
-            print("Level {}, rollout {} : percentage passed {:.3f} from total episodes {}".format(
-                level, rollout, perc_passed, ep),
-                file=exp_config_file, flush=True)
-            return True, None
-        return False, None
-
-    elif env_type in ['cartpole', 'mountaincar', 'acrobot', 'sokoban', 'freeway', 'enduro', 'krull',
-                      'alien', 'mspacman', 'crazyclimber', 'pong', 'mini', 'mini-avoid', 'mini-hunt',
-                      'mini-ambush', 'mini-rush']:
+    if env_type in ['cartpole', 'mountaincar', 'acrobot']:
         print("Rollout {} : Number of steps passed {:.3f} from total episodes {} (perc {:.3f})".format(
             rollout, all_passed, ep, (all_passed * 1.0) / (ep * 1.0)))
         print("Rollout {} : Number of steps passed {:.3f} from total episodes {} (perc {:.3f})".format(
             rollout, all_passed, ep, (all_passed * 1.0) / (ep * 1.0)), file=exp_config_file, flush=True)
         return all_passed, ep
-
-
-def test_maze(test_maze_size, test_indices, policy, exp_config_file):
-    test_passed = np.zeros(len(test_indices.keys()))
-    test_total = np.zeros(len(test_indices.keys()))
-    test_perc = np.zeros(len(test_indices.keys()))
-    for length in sorted(test_indices.keys()):
-        print("Length ", length, "has ", len(test_indices[length]), " mazes.")
-        test_env = test_vec_envs(maze_size=test_maze_size,
-                                 train_maze=False, maze_indices_list=test_indices[length],
-                                 device=args.device, num_processes=args.num_processes,
-                                 env_type=args.env_type, fail_on_repeated_state=True, explode_maze=args.explode_maze)
-
-        obs = test_env.reset()
-        while True:
-            with torch.no_grad():
-                value, action, log_pros = policy.act(obs, deterministic=True)
-            obs, reward, done, solved_obs = test_env.step(action)
-            reward = torch.tensor(reward, device=args.device)
-            done_ep, passed_metric = evaluate_step_batch(env_type=args.env_type, reward=reward, done=done)
-
-            test_passed[int(length) - 1] += passed_metric
-            test_total[int(length) - 1] += done_ep
-
-            if torch.max(reward) < -1.0:
-                break
-
-        test_perc[int(length) - 1] = test_passed[int(length) - 1] * 100. / test_total[int(length) - 1]
-        overall_perc_passed = test_perc[int(length) - 1]
-        print("#test# Overall percentage passed for paths of length {} is: {}".format(length, overall_perc_passed),
-              flush=True)
-        print("#test# Overall percentage passed for paths of length {} is: {}".format(length, overall_perc_passed),
-              file=exp_config_file, flush=True)
-    overall_perc = np.sum(test_passed) * 100. / np.sum(test_total)
-    print("#test# Overall percentage passed is: {}".format(overall_perc),
-          flush=True)
-    print("#test# Overall percentage passed is: {}".format(overall_perc),
-          file=exp_config_file, flush=True)
-
-    return overall_perc, (test_passed, test_total, test_perc)
 
 
 if __name__ == '__main__':
