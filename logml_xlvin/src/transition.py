@@ -1,3 +1,4 @@
+import gym
 import numpy as np
 import torch
 from torch import nn
@@ -112,3 +113,50 @@ class Transition(nn.Module):
 
     def forward(self, state, action):
         return self.transition_model(state, action)
+
+
+def retrain_transition_on_cartpole(
+        transition: Transition, optimizer, num_episodes, exp_config_file, transe_loss_coef=1., batch_size=128
+):
+    env = gym.make("CartPole-v0")
+
+    overall_loss = 0.
+    episodes = 0
+    prev_state = env.reset()
+    obs = []
+    next_obs = []
+    actions = []
+    while episodes < num_episodes:
+        action = torch.randint(0, 2, (1,))
+        state, reward, done, _ = env.step(action.item())
+        if done:
+            episodes += 1
+            state = env.reset()
+        else:
+            obs += [torch.Tensor(prev_state)]
+            actions += [action]
+            next_obs += [torch.Tensor(state)]
+        prev_state = state
+
+    obs = torch.stack(obs, 0)
+    next_obs = torch.stack(next_obs, 0)
+    actions = torch.stack(actions, 0)
+    num_batches = int(obs.shape[0] / batch_size)
+    print("Obs ", obs.shape)
+    print("Num batches ", num_batches)
+    for i in range(num_batches):
+        optimizer.zero_grad()
+        batch_obs = obs[i * batch_size: (i + 1) * batch_size]
+        batch_next_obs = next_obs[i * batch_size: (i + 1) * batch_size]
+        batch_actions = actions[i * batch_size: (i + 1) * batch_size]
+
+        loss = transe_loss_coef * transition.contrastive_loss(batch_obs, batch_actions.squeeze(),
+                                                              batch_next_obs)  # / batch_obs.shape[0]
+        overall_loss += loss.detach().item()
+        if i % 5 == 0:
+            print("Loss ", overall_loss)
+            print("Loss ", overall_loss, file=exp_config_file)
+
+            overall_loss = 0.
+        loss.backward(retain_graph=True)
+        optimizer.step()

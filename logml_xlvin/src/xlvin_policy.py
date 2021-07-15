@@ -42,7 +42,7 @@ class XLVINModel(nn.Module):
         fc_input_dim = transition_hidden_dim  # why?
 
         fc_input_dim = self._add_executor(
-            transition_hidden_dim, transition2gnn_n_layers, edge_features_dim, executor.hidden_dim, executor,
+            transition_hidden_dim, transition2gnn_n_layers, edge_features_dim, executor,
             gnn_decoder_n_layers, gnn_steps, cat_enc_gnn, full_cat_gnn
         )
 
